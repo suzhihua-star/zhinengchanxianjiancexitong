@@ -1,0 +1,83 @@
+version: "3.8"
+
+services:
+  # 数据库 (TimescaleDB)
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sf-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: smart_factory
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # 缓存 (Redis)
+  redis:
+    image: redis:7-alpine
+    container_name: sf-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # 后端服务 (FastAPI)
+  backend:
+    build: ./backend
+    container_name: sf-backend
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: smart_factory
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 模拟数据生成器
+  simulator:
+    build: ./backend
+    container_name: sf-simulator
+    command: python -m app.simulator
+    environment:
+      SIMULATOR_BACKEND_URL: http://backend:8000
+      SIMULATOR_INTERVAL: "1.0"
+      SIMULATOR_ANOMALY_RATE: "0.03"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # 前端 (Nginx + Vue)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sf-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
